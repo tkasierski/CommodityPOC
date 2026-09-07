@@ -13,6 +13,7 @@ from market_logic import Snapshot, build_snapshot_from_frames, generate_demo_mar
 APP_TITLE = "Aluminum Market Outlook"
 DEFAULT_TARGET_DELTA = 0.50
 HISTORICAL_CURVE_PATH = Path("data/barchart_cme_aluminum_2026-09-04.csv")
+ILLUSTRATIVE_OPTIONS_PATH = Path("data/illustrative_options_2026-09-04.csv")
 
 PAGE_CSS = """
 <style>
@@ -26,6 +27,7 @@ div[data-testid="stMetric"] { background:#fff; border:1px solid #e5eaf0; border-
 .insight-card { background:#fffaf0; border:1px solid #f0dfb8; border-left:5px solid #c58a21; border-radius:14px; padding:1rem 1.2rem; margin:.35rem 0 1rem 0; }
 .insight-label { color:#8a5f13; font-size:.76rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
 .insight-text { color:#3e4653; font-size:.96rem; line-height:1.5; }
+.disclosure-card { background:#f5f7fa; border:1px solid #dfe5ec; border-radius:12px; padding:.85rem 1rem; margin:.25rem 0 1rem 0; color:#5a6575; font-size:.84rem; line-height:1.5; }
 .section-kicker { color:#7a8699; font-size:.78rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; margin-top:.45rem; }
 .section-title { color:#172033; font-size:1.23rem; font-weight:700; }
 .section-subtitle { color:#667085; font-size:.9rem; margin-bottom:.55rem; }
@@ -66,11 +68,13 @@ def make_price_chart(summary: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=summary["expiry"], y=summary["current_lock_in_price"], mode="lines+markers",
         name="Current Lock-In Price", line=dict(color=COLORS["lock"], width=3), marker=dict(size=7),
+        hovertemplate="%{x|%b %Y}<br>Lock-In: $%{y:,.0f}/t<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
         x=summary["expiry"], y=summary["market_implied_price_scenario"], mode="lines+markers",
-        name="Market-Implied Price Outlook", line=dict(color=COLORS["outlook"], width=3), marker=dict(size=8),
+        name="Illustrative Market-Implied Outlook", line=dict(color=COLORS["outlook"], width=3), marker=dict(size=8),
         fill="tonexty", fillcolor=COLORS["fill"],
+        hovertemplate="%{x|%b %Y}<br>Illustrative outlook: $%{y:,.0f}/t<extra></extra>",
     ))
     fig.update_layout(height=430, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20,r=20,t=20,b=20),
                       hovermode="x unified", legend=dict(orientation="h", y=1.03),
@@ -106,6 +110,18 @@ def load_historical_curve() -> pd.DataFrame:
     return curve.sort_values("expiry").reset_index(drop=True)
 
 
+def load_historical_snapshot(target_delta: float) -> Snapshot:
+    curve = load_historical_curve()
+    futures = curve[["expiry", "forward_price"]].copy()
+    options = pd.read_csv(ILLUSTRATIVE_OPTIONS_PATH)
+    return build_snapshot_from_frames(
+        futures,
+        options,
+        target_delta,
+        "Real CME futures + illustrative synthetic options",
+    )
+
+
 def build_snapshot_from_inputs(source_mode: str, target_delta: float, futures_upload, options_upload) -> Snapshot:
     if source_mode == "Demo data":
         seed = int(datetime.now(timezone.utc).timestamp() // 60)
@@ -119,71 +135,117 @@ def build_snapshot_from_inputs(source_mode: str, target_delta: float, futures_up
     )
 
 
-def render_curve_table(curve: pd.DataFrame, historical: bool = False) -> None:
-    if historical:
-        table = curve[["contract_month", "barchart_symbol", "forward_price"]].copy()
-        table = table.rename(columns={
-            "contract_month": "Contract Month",
-            "barchart_symbol": "Barchart Symbol",
-            "forward_price": "Historical Futures Price",
-        })
-        st.dataframe(
-            table,
-            use_container_width=True,
-            hide_index=True,
-            column_config={"Historical Futures Price": st.column_config.NumberColumn(format="$%.2f /t")},
-        )
-        return
-
-    display_cols = [c for c in ["expiry", "contract", "bid", "ask", "forward_price"] if c in curve.columns]
-    table = curve[display_cols].copy()
-    if "expiry" in table:
-        table["expiry"] = pd.to_datetime(table["expiry"]).dt.strftime("%b %Y")
-    table = table.rename(columns={
-        "expiry": "Contract Month", "contract": "LME Contract", "bid": "Bid", "ask": "Ask", "forward_price": "Mid / Lock-In Reference"
-    })
-    st.dataframe(table, use_container_width=True, hide_index=True,
-                 column_config={
-                     "Bid": st.column_config.NumberColumn(format="$%.0f /t"),
-                     "Ask": st.column_config.NumberColumn(format="$%.0f /t"),
-                     "Mid / Lock-In Reference": st.column_config.NumberColumn(format="$%.0f /t"),
-                 })
+def render_decision_table(summary: pd.DataFrame) -> None:
+    table = summary.copy()
+    table["Procurement Period"] = table["expiry"].dt.strftime("%b %Y")
+    table["Current Lock-In Price"] = table["current_lock_in_price"]
+    table["Illustrative Market-Implied Outlook"] = table["market_implied_price_scenario"]
+    table["Potential Hedge Protection"] = table["potential_hedge_protection"]
+    table["Potential Hedge Protection %"] = table["potential_hedge_protection_pct"]
+    st.dataframe(
+        table[[
+            "Procurement Period",
+            "Current Lock-In Price",
+            "Illustrative Market-Implied Outlook",
+            "Potential Hedge Protection",
+            "Potential Hedge Protection %",
+        ]],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Current Lock-In Price": st.column_config.NumberColumn(format="$%.0f /t"),
+            "Illustrative Market-Implied Outlook": st.column_config.NumberColumn(format="$%.0f /t"),
+            "Potential Hedge Protection": st.column_config.NumberColumn(format="$%.0f /t"),
+            "Potential Hedge Protection %": st.column_config.NumberColumn(format="%.1f%%"),
+        },
+    )
 
 
-def render_historical_snapshot() -> None:
-    curve = load_historical_curve()
-    nearest = curve.iloc[0]
-    farthest = curve.iloc[-1]
-    peak = curve.loc[curve["forward_price"].idxmax()]
-    curve_change = farthest["forward_price"] / nearest["forward_price"] - 1
+def render_historical_snapshot(target_delta: float) -> None:
+    snap = load_historical_snapshot(target_delta)
+    summary = snap.summary
+    strongest = summary.loc[summary["potential_hedge_protection_pct"].idxmax()]
+    nearest = summary.iloc[0]
 
     st.markdown(
-        "<span class='snapshot-pill'>Historical CME aluminum snapshot · Sep 4, 2026 · sourced from Barchart delayed market pages</span>",
+        "<span class='snapshot-pill'>Historical CME aluminum snapshot · Sep 4, 2026 · real futures + illustrative options</span>",
         unsafe_allow_html=True,
     )
-    st.markdown("""
+    st.markdown(f"""
     <div class='insight-card'>
-        <div class='insight-label'>Historical market snapshot</div>
-        <div class='insight-text'>These are real CME aluminum futures prices captured from Barchart for the Sep. 4, 2026 market snapshot. The archived option-chain rows were not reproducibly accessible from the public page, so this mode intentionally does <b>not</b> display a fabricated options-derived outlook.</div>
+        <div class='insight-label'>What stands out</div>
+        <div class='insight-text'>In this demonstration, the largest potential hedge protection is <b>{strongest['potential_hedge_protection_pct']:.1%}</b> (<b>${strongest['potential_hedge_protection']:,.0f}/t</b>) in <b>{strongest['expiry'].strftime('%b %Y')}</b>.</div>
     </div>
     """, unsafe_allow_html=True)
 
+    st.markdown("""
+    <div class='disclosure-card'><b>Demonstration disclosure:</b> The CME aluminum futures curve is a real Sep. 4, 2026 historical market snapshot sourced from Barchart. The option-implied outlook is synthetic and was constructed solely to demonstrate how this dashboard would behave with a production options-data feed.</div>
+    """, unsafe_allow_html=True)
+
     c1, c2, c3 = st.columns(3)
-    c1.metric("Sep 2026 Futures", f"${nearest['forward_price']:,.2f}/t")
-    c2.metric("Peak Displayed Contract", f"${peak['forward_price']:,.2f}/t", peak["contract_month"])
-    c3.metric("Sep '26 to Aug '27 Curve", f"{curve_change:+.1%}")
+    c1.metric("Near-Term Lock-In Price", f"${nearest['current_lock_in_price']:,.0f}/t")
+    c2.metric("Near-Term Illustrative Outlook", f"${nearest['market_implied_price_scenario']:,.0f}/t")
+    c3.metric("Average Potential Hedge Protection", f"{summary['potential_hedge_protection_pct'].mean():.1%}")
 
-    st.markdown("<div class='section-kicker'>Historical Market</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>CME aluminum futures curve — Sep. 4, 2026</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-subtitle'>A real dated market curve for the executive POC. Production would refresh from a licensed futures/options feed.</div>", unsafe_allow_html=True)
-    st.plotly_chart(make_curve_chart(curve), use_container_width=True, config={"displayModeBar": False})
+    st.markdown("<div class='section-kicker'>Primary View</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Lock-in price vs. illustrative market-implied outlook</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-subtitle'>The futures line is historical market data. The option-derived line is a realistic synthetic placeholder for the POC.</div>", unsafe_allow_html=True)
+    st.plotly_chart(make_price_chart(summary), use_container_width=True, config={"displayModeBar": False})
 
-    st.markdown("<div class='section-title'>Contract detail</div>", unsafe_allow_html=True)
-    render_curve_table(curve, historical=True)
+    st.markdown("<div class='section-kicker'>Decision Support</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Potential hedge protection by procurement period</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-subtitle'>The larger the gap, the more protection a hedge could provide if the higher-cost scenario materialized.</div>", unsafe_allow_html=True)
+    st.plotly_chart(make_protection_chart(summary), use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("<div class='section-kicker'>Detail</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Procurement decision table</div>", unsafe_allow_html=True)
+    render_decision_table(summary)
+
     st.markdown(
-        "<div class='small-note'>Source: Barchart public delayed CME/COMEX aluminum futures pages, snapshot dated Sep. 4, 2026. Prices are reference market data for demonstration, not executable quotes.</div>",
+        "<div class='small-note'>Futures source: Barchart public delayed CME/COMEX aluminum market pages, historical snapshot dated Sep. 4, 2026. Illustrative options layer: synthetic POC data centered around approximately 50-delta calls. Production would replace this layer with licensed or live options data.</div>",
         unsafe_allow_html=True,
     )
+
+
+def render_live_lme(refresh: bool) -> None:
+    if refresh or "live_curve" not in st.session_state:
+        st.session_state.live_curve = refresh_live_curve()
+        st.session_state.live_refreshed = datetime.now().astimezone()
+
+    curve = st.session_state.live_curve
+    refreshed = st.session_state.live_refreshed
+    nearest = curve.iloc[0]
+    farthest = curve.iloc[-1]
+    curve_change = farthest["forward_price"] / nearest["forward_price"] - 1
+
+    st.markdown(f"<span class='snapshot-pill'>LME public market data · delayed ≥15 minutes · refreshed {refreshed.strftime('%b %d, %Y · %I:%M %p %Z')}</span>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Nearest Lock-In Reference", f"${nearest['forward_price']:,.0f}/t")
+    c2.metric("Farthest Displayed Contract", f"${farthest['forward_price']:,.0f}/t")
+    c3.metric("Curve Change", f"{curve_change:+.1%}")
+    st.markdown("<div class='section-kicker'>Live Market</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>LME aluminum monthly futures curve</div>", unsafe_allow_html=True)
+    st.plotly_chart(make_curve_chart(curve), use_container_width=True, config={"displayModeBar": False})
+
+
+def render_generic_snapshot(snap: Snapshot) -> None:
+    summary = snap.summary
+    strongest = summary.loc[summary["potential_hedge_protection_pct"].idxmax()]
+    nearest = summary.iloc[0]
+    st.markdown(f"<span class='snapshot-pill'>{snap.source_label}</span>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class='insight-card'>
+        <div class='insight-label'>What stands out</div>
+        <div class='insight-text'>The largest modeled hedge-protection opportunity is <b>{strongest['potential_hedge_protection_pct']:.1%}</b> in <b>{strongest['expiry'].strftime('%b %Y')}</b>.</div>
+    </div>
+    """, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Near-Term Lock-In Price", f"${nearest['current_lock_in_price']:,.0f}/t")
+    c2.metric("Near-Term Market Outlook", f"${nearest['market_implied_price_scenario']:,.0f}/t")
+    c3.metric("Average Potential Hedge Protection", f"{summary['potential_hedge_protection_pct'].mean():.1%}")
+    st.plotly_chart(make_price_chart(summary), use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(make_protection_chart(summary), use_container_width=True, config={"displayModeBar": False})
+    render_decision_table(summary)
 
 
 def main() -> None:
@@ -194,7 +256,7 @@ def main() -> None:
         st.markdown("### Dashboard Controls")
         source_mode = st.radio(
             "Data mode",
-            ["Historical CME snapshot", "Live LME futures", "Demo data", "Upload CSVs"],
+            ["Historical CME + illustrative options", "Live LME futures", "Demo data", "Upload CSVs"],
             index=0,
         )
         target_delta = st.slider("Options outlook setting", 0.10, 0.90, DEFAULT_TARGET_DELTA, 0.05)
@@ -205,111 +267,40 @@ def main() -> None:
             futures_upload = st.file_uploader("Futures / forwards CSV", type="csv")
             options_upload = st.file_uploader("Call options CSV", type="csv")
 
-        if source_mode == "Live LME futures":
-            st.caption("Live mode uses LME public monthly futures quotes, delayed at least 15 minutes. The options-based outlook is intentionally disabled until a valid options chain is available.")
-        elif source_mode == "Historical CME snapshot":
-            st.caption("This mode uses a real Sep. 4, 2026 Barchart CME aluminum futures snapshot. Options remain disabled because archived public chain rows could not be captured reliably.")
+        if source_mode == "Historical CME + illustrative options":
+            st.caption("Default executive-demo mode: real Sep. 4, 2026 CME aluminum futures with a clearly labeled synthetic options layer.")
+        elif source_mode == "Live LME futures":
+            st.caption("Live delayed LME futures only. No options-derived outlook is shown in this mode.")
 
     left, right = st.columns([4.2, 1.15])
     with left:
         st.markdown("<div class='hero-eyebrow'>Commodity Risk Dashboard</div>", unsafe_allow_html=True)
         st.markdown(f"# {APP_TITLE}")
-        st.markdown("<div class='hero-copy'>A management view of aluminum prices available to lock, with an option-derived risk layer when valid options data is supplied.</div>", unsafe_allow_html=True)
+        st.markdown("<div class='hero-copy'>A management view of aluminum prices available to lock, compared with a probability-based price-risk outlook.</div>", unsafe_allow_html=True)
     with right:
         st.write("")
         st.write("")
         refresh = st.button("Refresh Market Data", type="primary", use_container_width=True)
 
-    if source_mode == "Historical CME snapshot":
-        render_historical_snapshot()
+    if source_mode == "Historical CME + illustrative options":
+        render_historical_snapshot(target_delta)
         return
 
     if source_mode == "Live LME futures":
-        if refresh or "live_curve" not in st.session_state:
-            try:
-                st.session_state.live_curve = refresh_live_curve()
-                st.session_state.live_refreshed = datetime.now().astimezone()
-            except Exception as exc:
-                st.error(f"Could not refresh LME data: {exc}")
-                st.stop()
-
-        curve = st.session_state.live_curve
-        refreshed = st.session_state.live_refreshed
-        nearest = curve.iloc[0]
-        farthest = curve.iloc[-1]
-        curve_change = farthest["forward_price"] / nearest["forward_price"] - 1
-
-        st.markdown(f"<span class='snapshot-pill'>LME public market data · delayed ≥15 minutes · refreshed {refreshed.strftime('%b %d, %Y · %I:%M %p %Z')}</span>", unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class='insight-card'>
-            <div class='insight-label'>Current state</div>
-            <div class='insight-text'>This view uses real delayed LME aluminum futures quotes. The option-implied risk layer is not shown because a reliable free automated aluminum options feed has not been identified.</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Nearest Lock-In Reference", f"${nearest['forward_price']:,.0f}/t")
-        c2.metric("Farthest Displayed Contract", f"${farthest['forward_price']:,.0f}/t")
-        c3.metric("Curve Change", f"{curve_change:+.1%}")
-
-        st.markdown("<div class='section-kicker'>Live Market</div>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>LME aluminum monthly futures curve</div>", unsafe_allow_html=True)
-        st.markdown("<div class='section-subtitle'>Midpoint of public LME bid/ask quotes for the first six monthly contracts.</div>", unsafe_allow_html=True)
-        st.plotly_chart(make_curve_chart(curve), use_container_width=True, config={"displayModeBar": False})
-
-        st.markdown("<div class='section-title'>Contract detail</div>", unsafe_allow_html=True)
-        render_curve_table(curve)
-        st.markdown("<div class='small-note'>Source: London Metal Exchange public delayed monthly futures quotes. This is a market-data reference for the POC, not an executable dealer quote.</div>", unsafe_allow_html=True)
+        try:
+            render_live_lme(refresh)
+        except Exception as exc:
+            st.error(f"Could not refresh LME data: {exc}")
         return
 
     if refresh or "snapshot" not in st.session_state:
         try:
             st.session_state.snapshot = build_snapshot_from_inputs(source_mode, target_delta, futures_upload, options_upload)
-            st.session_state.snapshot_target_delta = target_delta
         except Exception as exc:
             st.error(str(exc))
             st.stop()
 
-    snap: Snapshot = st.session_state.snapshot
-    summary = snap.summary
-    strongest = summary.loc[summary["potential_hedge_protection_pct"].idxmax()]
-
-    st.markdown(f"<span class='snapshot-pill'>Refreshed {snap.refreshed_at.strftime('%b %d, %Y · %I:%M %p %Z')} · {snap.source_label}</span>", unsafe_allow_html=True)
-    st.markdown(f"""
-    <div class='insight-card'>
-        <div class='insight-label'>What stands out</div>
-        <div class='insight-text'>The largest modeled hedge-protection opportunity is <b>{strongest['potential_hedge_protection_pct']:.1%}</b> in <b>{strongest['expiry'].strftime('%b %Y')}</b>.</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    nearest = summary.iloc[0]
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Near-Term Lock-In Price", f"${nearest['current_lock_in_price']:,.0f}/t")
-    c2.metric("Near-Term Market Outlook", f"${nearest['market_implied_price_scenario']:,.0f}/t")
-    c3.metric("Average Potential Hedge Protection", f"{summary['potential_hedge_protection_pct'].mean():.1%}")
-
-    st.markdown("<div class='section-kicker'>Primary View</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>Lock-in price vs. market-implied outlook</div>", unsafe_allow_html=True)
-    st.plotly_chart(make_price_chart(summary), use_container_width=True, config={"displayModeBar": False})
-
-    st.markdown("<div class='section-title'>Potential hedge protection by procurement period</div>", unsafe_allow_html=True)
-    st.plotly_chart(make_protection_chart(summary), use_container_width=True, config={"displayModeBar": False})
-
-    table = summary.copy()
-    table["Procurement Period"] = table["expiry"].dt.strftime("%b %Y")
-    table["Current Lock-In Price"] = table["current_lock_in_price"]
-    table["Market-Implied Price Outlook"] = table["market_implied_price_scenario"]
-    table["Potential Hedge Protection"] = table["potential_hedge_protection"]
-    table["Potential Hedge Protection %"] = table["potential_hedge_protection_pct"]
-    st.dataframe(table[["Procurement Period", "Current Lock-In Price", "Market-Implied Price Outlook", "Potential Hedge Protection", "Potential Hedge Protection %"]],
-                 use_container_width=True, hide_index=True,
-                 column_config={
-                     "Current Lock-In Price": st.column_config.NumberColumn(format="$%.0f /t"),
-                     "Market-Implied Price Outlook": st.column_config.NumberColumn(format="$%.0f /t"),
-                     "Potential Hedge Protection": st.column_config.NumberColumn(format="$%.0f /t"),
-                     "Potential Hedge Protection %": st.column_config.NumberColumn(format="%.1f%%"),
-                 })
+    render_generic_snapshot(st.session_state.snapshot)
 
 
 if __name__ == "__main__":
