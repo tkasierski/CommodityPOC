@@ -15,6 +15,7 @@ BASE_OUTLOOK_DELTA = 0.50
 DEFAULT_ADVERSE_DELTA = 0.35
 HEDGE_SIGNAL_THRESHOLD_PP = 0.75
 HISTORICAL_CURVE_PATH = Path("data/barchart_cme_aluminum_2026-09-04.csv")
+HISTORICAL_SPOT_PATH = Path("data/barchart_cme_aluminum_cash_2026-09-04.csv")
 ILLUSTRATIVE_OPTIONS_PATH = Path("data/illustrative_options_2026-09-04.csv")
 NORMAL_GAP_PATH = Path("data/illustrative_normal_gap_35delta.csv")
 
@@ -34,11 +35,8 @@ div[data-testid="stMetric"] { background:#fff; border:1px solid #e5eaf0; border-
 .signal-card { background:#f1f7f3; border:1px solid #cfe2d5; border-left:6px solid #4f7d5d; border-radius:14px; padding:1.05rem 1.25rem; margin:.45rem 0 1rem 0; }
 .signal-card.no-signal { background:#f7f8fa; border-color:#e2e6eb; border-left-color:#8894a5; }
 .signal-label { color:#486b53; font-size:.76rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
-.signal-card.no-signal .signal-label { color:#667085; }
 .signal-title { color:#1f3526; font-size:1.25rem; font-weight:750; margin-top:.15rem; }
-.signal-card.no-signal .signal-title { color:#344054; }
 .signal-copy { color:#4b5c50; font-size:.92rem; line-height:1.5; margin-top:.2rem; }
-.signal-card.no-signal .signal-copy { color:#667085; }
 .math-card { background:#ffffff; border:1px solid #e2e7ed; border-radius:14px; padding:1rem 1.2rem; margin:.35rem 0 1rem 0; }
 .math-title { color:#344054; font-size:.9rem; font-weight:750; margin-bottom:.35rem; }
 .math-copy { color:#667085; font-size:.86rem; line-height:1.6; }
@@ -52,127 +50,25 @@ div.stButton > button { border-radius:10px; font-weight:650; min-height:2.6rem; 
 """
 
 COLORS = {
+    "spot": "#344054",
     "lock": "#5E6C84",
     "base": "#8A96A8",
     "adverse": "#C58A21",
     "fill": "rgba(197,138,33,.10)",
-    "bar": "#7C91B2",
     "normal": "#A3ACB9",
-    "current_gap": "#C58A21",
     "grid": "#E8EDF3",
     "text": "#475467",
 }
-
-
-def make_curve_chart(curve: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=curve["expiry"], y=curve["forward_price"], mode="lines+markers",
-        name="Current Lock-In Price", line=dict(color=COLORS["lock"], width=3), marker=dict(size=8),
-        hovertemplate="%{x|%b %Y}<br>$%{y:,.0f}/t<extra></extra>",
-    ))
-    fig.update_layout(height=390, paper_bgcolor="white", plot_bgcolor="white",
-                      margin=dict(l=20, r=20, t=20, b=20), showlegend=False,
-                      font=dict(family="Arial, sans-serif", color=COLORS["text"]))
-    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
-    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True,
-                     gridcolor=COLORS["grid"], zeroline=False)
-    return fig
-
-
-def make_historical_price_chart(base_summary: pd.DataFrame, adverse_summary: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=adverse_summary["expiry"], y=adverse_summary["current_lock_in_price"], mode="lines+markers",
-        name="Current Lock-In Price", line=dict(color=COLORS["lock"], width=3), marker=dict(size=7),
-        hovertemplate="%{x|%b %Y}<br>Lock-In: $%{y:,.0f}/t<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=base_summary["expiry"], y=base_summary["market_implied_price_scenario"], mode="lines+markers",
-        name="Base Market Outlook (50Δ)", line=dict(color=COLORS["base"], width=2, dash="dot"), marker=dict(size=6),
-        hovertemplate="%{x|%b %Y}<br>Base outlook: $%{y:,.0f}/t<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=adverse_summary["expiry"], y=adverse_summary["market_implied_price_scenario"], mode="lines+markers",
-        name="Adverse Cost Scenario", line=dict(color=COLORS["adverse"], width=3), marker=dict(size=8),
-        fill="tonexty", fillcolor=COLORS["fill"],
-        hovertemplate="%{x|%b %Y}<br>Adverse scenario: $%{y:,.0f}/t<extra></extra>",
-    ))
-    fig.update_layout(height=440, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20, r=20, t=20, b=20),
-                      hovermode="x unified", legend=dict(orientation="h", y=1.03),
-                      font=dict(family="Arial, sans-serif", color=COLORS["text"]))
-    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
-    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True,
-                     gridcolor=COLORS["grid"], zeroline=False)
-    return fig
-
-
-def make_price_chart(summary: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=summary["expiry"], y=summary["current_lock_in_price"], mode="lines+markers",
-        name="Current Lock-In Price", line=dict(color=COLORS["lock"], width=3), marker=dict(size=7),
-    ))
-    fig.add_trace(go.Scatter(
-        x=summary["expiry"], y=summary["market_implied_price_scenario"], mode="lines+markers",
-        name="Market-Implied Outlook", line=dict(color=COLORS["adverse"], width=3), marker=dict(size=8),
-        fill="tonexty", fillcolor=COLORS["fill"],
-    ))
-    fig.update_layout(height=430, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20, r=20, t=20, b=20),
-                      hovermode="x unified", legend=dict(orientation="h", y=1.03),
-                      font=dict(family="Arial, sans-serif", color=COLORS["text"]))
-    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
-    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True,
-                     gridcolor=COLORS["grid"], zeroline=False)
-    return fig
-
-
-def make_protection_chart(summary: pd.DataFrame) -> go.Figure:
-    pct = summary["potential_hedge_protection_pct"] * 100
-    fig = go.Figure(go.Bar(
-        x=summary["expiry"], y=pct, marker_color=COLORS["bar"],
-        text=pct.map(lambda x: f"{x:.1f}%"), textposition="outside",
-        hovertemplate="%{x|%b %Y}<br>Potential protection: %{y:.1f}%<extra></extra>",
-    ))
-    fig.update_layout(height=315, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20, r=20, t=20, b=20),
-                      font=dict(family="Arial, sans-serif", color=COLORS["text"]))
-    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
-    fig.update_yaxes(title="Protection vs. lock-in", ticksuffix="%", gridcolor=COLORS["grid"], zeroline=False)
-    return fig
-
-
-def make_gap_vs_normal_chart(decision: pd.DataFrame) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=decision["expiry"], y=decision["normal_gap_pct"] * 100,
-        name="Normal Gap", marker_color=COLORS["normal"],
-        hovertemplate="%{x|%b %Y}<br>Normal gap: %{y:.1f}%<extra></extra>",
-    ))
-    fig.add_trace(go.Bar(
-        x=decision["expiry"], y=decision["current_gap_pct"] * 100,
-        name="Current Adverse Gap", marker_color=COLORS["current_gap"],
-        hovertemplate="%{x|%b %Y}<br>Current gap: %{y:.1f}%<extra></extra>",
-    ))
-    fig.update_layout(
-        barmode="group", height=350, paper_bgcolor="white", plot_bgcolor="white",
-        margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", y=1.03),
-        font=dict(family="Arial, sans-serif", color=COLORS["text"]),
-    )
-    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
-    fig.update_yaxes(title="Gap vs. forward", ticksuffix="%", gridcolor=COLORS["grid"], zeroline=False)
-    return fig
-
-
-def refresh_live_curve() -> pd.DataFrame:
-    curve = fetch_lme_aluminum_monthly_curve()
-    curve["expiry"] = pd.to_datetime(curve["expiry"])
-    return curve
 
 
 def load_historical_curve() -> pd.DataFrame:
     curve = pd.read_csv(HISTORICAL_CURVE_PATH)
     curve["expiry"] = pd.to_datetime(curve["contract_month"] + "-01") + pd.offsets.MonthEnd(0)
     return curve.sort_values("expiry").reset_index(drop=True)
+
+
+def load_historical_spot() -> float:
+    return float(pd.read_csv(HISTORICAL_SPOT_PATH).iloc[0]["spot_price"])
 
 
 def load_historical_snapshot(target_delta: float) -> Snapshot:
@@ -182,6 +78,75 @@ def load_historical_snapshot(target_delta: float) -> Snapshot:
     return build_snapshot_from_frames(
         futures, options, target_delta, "Real CME futures + illustrative synthetic options"
     )
+
+
+def make_historical_price_chart(base_summary: pd.DataFrame, adverse_summary: pd.DataFrame, spot_price: float) -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=adverse_summary["expiry"],
+        y=adverse_summary["current_lock_in_price"],
+        mode="lines+markers",
+        name="Forward / Lock-In Price",
+        line=dict(color=COLORS["lock"], width=3),
+        marker=dict(size=7),
+    ))
+    fig.add_trace(go.Scatter(
+        x=base_summary["expiry"],
+        y=base_summary["market_implied_price_scenario"],
+        mode="lines+markers",
+        name="Base Market Outlook (50Δ)",
+        line=dict(color=COLORS["base"], width=2, dash="dot"),
+        marker=dict(size=6),
+    ))
+    fig.add_trace(go.Scatter(
+        x=adverse_summary["expiry"],
+        y=adverse_summary["market_implied_price_scenario"],
+        mode="lines+markers",
+        name="Adverse Cost Scenario (35Δ)",
+        line=dict(color=COLORS["adverse"], width=3),
+        marker=dict(size=8),
+        fill="tonexty",
+        fillcolor=COLORS["fill"],
+    ))
+    fig.add_hline(
+        y=spot_price,
+        line_dash="dash",
+        line_color=COLORS["spot"],
+        annotation_text=f"Spot ${spot_price:,.0f}/t",
+        annotation_position="bottom right",
+    )
+    fig.update_layout(
+        height=455,
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        margin=dict(l=20, r=20, t=20, b=20),
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.03),
+        font=dict(family="Arial, sans-serif", color=COLORS["text"]),
+    )
+    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
+    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True, gridcolor=COLORS["grid"], zeroline=False)
+    return fig
+
+
+def make_gap_vs_normal_chart(decision: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=decision["expiry"], y=decision["normal_gap_pct"] * 100,
+        name="Normal Gap", marker_color=COLORS["normal"],
+    ))
+    fig.add_trace(go.Bar(
+        x=decision["expiry"], y=decision["current_gap_pct"] * 100,
+        name="Current Adverse Gap", marker_color=COLORS["adverse"],
+    ))
+    fig.update_layout(
+        barmode="group", height=350, paper_bgcolor="white", plot_bgcolor="white",
+        margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", y=1.03),
+        font=dict(family="Arial, sans-serif", color=COLORS["text"]),
+    )
+    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
+    fig.update_yaxes(title="Gap vs. forward", ticksuffix="%", gridcolor=COLORS["grid"], zeroline=False)
+    return fig
 
 
 def build_decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
@@ -195,38 +160,6 @@ def build_decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
     return decision
 
 
-def build_snapshot_from_inputs(source_mode: str, target_delta: float, futures_upload, options_upload) -> Snapshot:
-    if source_mode == "Demo data":
-        seed = int(datetime.now(timezone.utc).timestamp() // 60)
-        futures, options = generate_demo_market_data(seed=seed)
-        return build_snapshot_from_frames(futures, options, target_delta, "Illustrative demo data")
-    if futures_upload is None or options_upload is None:
-        raise ValueError("Upload both the futures CSV and options CSV before refreshing.")
-    return build_snapshot_from_frames(
-        pd.read_csv(futures_upload), pd.read_csv(options_upload), target_delta, "Uploaded CSV snapshot"
-    )
-
-
-def render_decision_table(summary: pd.DataFrame, outlook_label: str = "Market-Implied Outlook") -> None:
-    table = summary.copy()
-    table["Procurement Period"] = table["expiry"].dt.strftime("%b %Y")
-    table["Current Lock-In Price"] = table["current_lock_in_price"]
-    table[outlook_label] = table["market_implied_price_scenario"]
-    table["Potential Hedge Protection"] = table["potential_hedge_protection"]
-    table["Potential Hedge Protection %"] = table["potential_hedge_protection_pct"] * 100
-    st.dataframe(
-        table[["Procurement Period", "Current Lock-In Price", outlook_label,
-               "Potential Hedge Protection", "Potential Hedge Protection %"]],
-        use_container_width=True, hide_index=True,
-        column_config={
-            "Current Lock-In Price": st.column_config.NumberColumn(format="$%.0f /t"),
-            outlook_label: st.column_config.NumberColumn(format="$%.0f /t"),
-            "Potential Hedge Protection": st.column_config.NumberColumn(format="$%.0f /t"),
-            "Potential Hedge Protection %": st.column_config.NumberColumn(format="%.1f%%"),
-        },
-    )
-
-
 def render_signal_table(decision: pd.DataFrame) -> None:
     table = decision.copy()
     table["Procurement Period"] = table["expiry"].dt.strftime("%b %Y")
@@ -236,7 +169,8 @@ def render_signal_table(decision: pd.DataFrame) -> None:
     table["Decision"] = table["decision"]
     st.dataframe(
         table[["Procurement Period", "Current Gap", "Normal Gap", "Excess vs. Normal", "Decision"]],
-        use_container_width=True, hide_index=True,
+        use_container_width=True,
+        hide_index=True,
         column_config={
             "Current Gap": st.column_config.NumberColumn(format="%.1f%%"),
             "Normal Gap": st.column_config.NumberColumn(format="%.1f%%"),
@@ -245,43 +179,79 @@ def render_signal_table(decision: pd.DataFrame) -> None:
     )
 
 
+def render_decision_table(summary: pd.DataFrame, spot_price: float) -> None:
+    table = summary.copy()
+    table["Procurement Period"] = table["expiry"].dt.strftime("%b %Y")
+    table["Spot Price"] = spot_price
+    table["Forward / Lock-In"] = table["current_lock_in_price"]
+    table["Forward vs. Spot %"] = (table["current_lock_in_price"] / spot_price - 1) * 100
+    table["Adverse Cost Scenario"] = table["market_implied_price_scenario"]
+    table["Scenario Protection"] = table["potential_hedge_protection"]
+    table["Scenario Protection %"] = table["potential_hedge_protection_pct"] * 100
+    st.dataframe(
+        table[[
+            "Procurement Period", "Spot Price", "Forward / Lock-In", "Forward vs. Spot %",
+            "Adverse Cost Scenario", "Scenario Protection", "Scenario Protection %",
+        ]],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Spot Price": st.column_config.NumberColumn(format="$%.0f /t"),
+            "Forward / Lock-In": st.column_config.NumberColumn(format="$%.0f /t"),
+            "Forward vs. Spot %": st.column_config.NumberColumn(format="%+.1f%%"),
+            "Adverse Cost Scenario": st.column_config.NumberColumn(format="$%.0f /t"),
+            "Scenario Protection": st.column_config.NumberColumn(format="$%.0f /t"),
+            "Scenario Protection %": st.column_config.NumberColumn(format="%.1f%%"),
+        },
+    )
+
+
 def render_historical_snapshot(adverse_delta: float) -> None:
-    base_snap = load_historical_snapshot(BASE_OUTLOOK_DELTA)
-    adverse_snap = load_historical_snapshot(adverse_delta)
-    base_summary = base_snap.summary
-    summary = adverse_snap.summary
-    strongest = summary.loc[summary["potential_hedge_protection_pct"].idxmax()]
+    base_summary = load_historical_snapshot(BASE_OUTLOOK_DELTA).summary
+    summary = load_historical_snapshot(adverse_delta).summary
+    spot_price = load_historical_spot()
     nearest = summary.iloc[0]
+    nearest_forward_premium = nearest["current_lock_in_price"] / spot_price - 1
     average_protection = summary["potential_hedge_protection_pct"].mean()
 
     st.markdown(
-        "<span class='snapshot-pill'>Historical CME aluminum snapshot · Sep 4, 2026 · real futures + illustrative options</span>",
+        "<span class='snapshot-pill'>Historical CME aluminum snapshot · Sep 4, 2026 · real spot + futures + illustrative options</span>",
         unsafe_allow_html=True,
     )
-    st.markdown(f"""
-    <div class='insight-card'>
-        <div class='insight-label'>What stands out</div>
-        <div class='insight-text'>In this demonstration, the selected adverse-cost scenario implies as much as <b>{strongest['potential_hedge_protection_pct']:.1%}</b> (<b>${strongest['potential_hedge_protection']:,.0f}/t</b>) of potential hedge protection in <b>{strongest['expiry'].strftime('%b %Y')}</b>. This is scenario protection, not expected savings.</div>
-    </div>
-    """, unsafe_allow_html=True)
 
     st.markdown("""
-    <div class='disclosure-card'><b>Demonstration disclosure:</b> The CME aluminum futures curve is a real Sep. 4, 2026 historical market snapshot sourced from Barchart. Both option-derived curves and the recent-history normalization are synthetic placeholders constructed to demonstrate the proposed production workflow. They are not historical observations and should not be interpreted as expected savings.</div>
+    <div class='disclosure-card'><b>Demonstration disclosure:</b> Spot and CME aluminum futures are real Sep. 4, 2026 historical market references sourced from Barchart. The option-derived scenarios and recent-history normalization are synthetic placeholders constructed solely to demonstrate the proposed production workflow.</div>
     """, unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Near-Term Lock-In Price", f"${nearest['current_lock_in_price']:,.0f}/t")
-    c2.metric("Near-Term Adverse Cost Scenario", f"${nearest['market_implied_price_scenario']:,.0f}/t")
-    c3.metric("Average Scenario Protection", f"{average_protection:.1%}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Spot Price", f"${spot_price:,.0f}/t")
+    c2.metric("Near-Term Forward", f"${nearest['current_lock_in_price']:,.0f}/t", f"{nearest_forward_premium:+.1%} vs spot")
+    c3.metric("Near-Term Adverse Scenario", f"${nearest['market_implied_price_scenario']:,.0f}/t")
+    c4.metric("Average Scenario Protection", f"{average_protection:.1%}")
 
-    st.markdown("<div class='section-kicker'>Primary View</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>Lock-in price vs. option-implied scenarios</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-subtitle'>The 50-delta line is a base outlook. The adverse-cost line uses a lower-delta scenario to show a plausible higher-cost outcome worth protecting against.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-kicker'>Market Context</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Spot today vs. what we can lock vs. what the options market could imply</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-subtitle'>Spot anchors the analysis at the current cash market. The forward curve shows today's lock-in prices for future procurement periods; the option-derived lines add forward-looking risk scenarios.</div>",
+        unsafe_allow_html=True,
+    )
     st.plotly_chart(
-        make_historical_price_chart(base_summary, summary),
+        make_historical_price_chart(base_summary, summary, spot_price),
         use_container_width=True,
         config={"displayModeBar": False},
     )
+
+    st.markdown(f"""
+    <div class='math-card'>
+        <div class='math-title'>How spot fits into the decision</div>
+        <div class='math-copy'>
+            <b>Spot</b> answers: where is the cash market now?<br>
+            <b>Forward vs. spot</b> answers: what premium or discount do we pay today to lock a future procurement period?<br>
+            <b>Adverse scenario vs. forward</b> answers: how much higher could our cost be if we stay unhedged and the adverse scenario materializes?<br><br>
+            Spot provides context, but the hedge signal is still based on the <b>adverse-scenario gap versus the forward</b>, normalized for what is typical at that same tenor. That keeps the decision rule focused on the risk we can actually lock today.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     if abs(adverse_delta - 0.35) < 1e-9:
         decision = build_decision_frame(summary)
@@ -290,7 +260,7 @@ def render_historical_snapshot(adverse_delta: float) -> None:
         st.markdown("<div class='section-kicker'>Decision Signal</div>", unsafe_allow_html=True)
         st.markdown("<div class='section-title'>Is the adverse gap unusually wide?</div>", unsafe_allow_html=True)
         st.markdown(
-            "<div class='section-subtitle'>This removes the mechanical effect of time-to-expiry by comparing each 35-delta gap with the normal gap for that same horizon.</div>",
+            "<div class='section-subtitle'>We compare each current 35-delta gap with the normal gap for the same horizon, so long-dated options are not automatically treated as more alarming simply because they have more time value.</div>",
             unsafe_allow_html=True,
         )
 
@@ -300,7 +270,7 @@ def render_historical_snapshot(adverse_delta: float) -> None:
             <div class='signal-card'>
                 <div class='signal-label'>Hedge signal</div>
                 <div class='signal-title'>{first_signal['expiry'].strftime('%b %Y')} is the first procurement period above the trigger</div>
-                <div class='signal-copy'>The current adverse gap is <b>{first_signal['current_gap_pct']:.1%}</b> versus a normal <b>{first_signal['normal_gap_pct']:.1%}</b> for that horizon — <b>{first_signal['excess_gap_pp']:.1f} percentage points wider than normal</b>. Under the illustrative policy, that is a signal to consider adding forward/futures hedge coverage for that expiry.</div>
+                <div class='signal-copy'>Current adverse gap: <b>{first_signal['current_gap_pct']:.1%}</b>. Normal gap for that horizon: <b>{first_signal['normal_gap_pct']:.1%}</b>. The gap is <b>{first_signal['excess_gap_pp']:.1f} percentage points wider than normal</b>, which triggers the illustrative rule to consider adding forward/futures hedge coverage for that expiry.</div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -314,86 +284,59 @@ def render_historical_snapshot(adverse_delta: float) -> None:
 
         st.markdown(f"""
         <div class='math-card'>
-            <div class='math-title'>How the decision rule works</div>
+            <div class='math-title'>Decision-rule math</div>
             <div class='math-copy'>
-                <b>1. Current adverse gap</b> = (35-delta scenario − forward price) ÷ forward price.<br>
-                <b>2. Normal gap</b> = the recent historical average 35-delta gap for the same time-to-expiry.<br>
-                <b>3. Excess gap</b> = current adverse gap − normal gap.<br>
-                <b>4. Decision</b> = if the excess gap is at least <b>{HEDGE_SIGNAL_THRESHOLD_PP:.2f} percentage points</b>, flag that expiry as a hedge candidate.<br><br>
-                The key idea is that a six-month option should normally sit farther from the forward than a one-month option. We only care when the gap is <i>unusually</i> wide relative to what is normal for that horizon.
+                <b>1.</b> Current adverse gap = (35-delta scenario − forward) ÷ forward.<br>
+                <b>2.</b> Normal gap = recent historical average 35-delta gap for the same tenor.<br>
+                <b>3.</b> Excess gap = current adverse gap − normal gap.<br>
+                <b>4.</b> If excess gap ≥ <b>{HEDGE_SIGNAL_THRESHOLD_PP:.2f} percentage points</b>, flag the expiry as a hedge candidate.
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        st.plotly_chart(
-            make_gap_vs_normal_chart(decision),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+        st.plotly_chart(make_gap_vs_normal_chart(decision), use_container_width=True, config={"displayModeBar": False})
         render_signal_table(decision)
-        st.markdown(
-            "<div class='small-note'>POC policy parameter: the 0.75 percentage-point trigger and the normal-gap history are illustrative. In production, both would be calibrated from actual historical options data and approved hedge-policy limits.</div>",
-            unsafe_allow_html=True,
-        )
     else:
-        st.info(
-            "The normalized hedge-signal benchmark in this POC is calibrated only to the default 35-delta adverse scenario. "
-            "Return the sidebar setting to 0.35 to view the normal-vs-current decision signal."
-        )
-
-    st.markdown("<div class='section-kicker'>Scenario Protection</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>Potential hedge protection under the adverse cost scenario</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-subtitle'>This measures protection if that adverse scenario occurs. It is deliberately not labeled as expected savings.</div>", unsafe_allow_html=True)
-    st.plotly_chart(make_protection_chart(summary), use_container_width=True, config={"displayModeBar": False})
+        st.info("The normalized hedge-signal benchmark in this POC is calibrated only to the default 35-delta adverse scenario.")
 
     st.markdown("<div class='section-kicker'>Detail</div>", unsafe_allow_html=True)
     st.markdown("<div class='section-title'>Procurement decision table</div>", unsafe_allow_html=True)
-    render_decision_table(summary, "Illustrative Adverse Cost Scenario")
+    st.markdown(
+        "<div class='section-subtitle'>Spot is repeated as a common market anchor so each future procurement period can be read relative to where aluminum was trading in the cash market on the snapshot date.</div>",
+        unsafe_allow_html=True,
+    )
+    render_decision_table(summary, spot_price)
 
     st.markdown(
-        "<div class='small-note'>Futures source: Barchart public delayed CME/COMEX aluminum market pages, historical snapshot dated Sep. 4, 2026. Options and normal-gap benchmark: synthetic POC data. Production would replace both synthetic layers with licensed/live and historical options data.</div>",
+        "<div class='small-note'>Historical spot reference: Barchart COMEX Aluminum Cash (ALY00), Sep. 4, 2026. Futures source: Barchart public CME/COMEX aluminum market pages. Options and normal-gap benchmark: synthetic POC data. Production would replace the synthetic layers with licensed/live and historical options data.</div>",
         unsafe_allow_html=True,
     )
 
 
 def render_live_lme(refresh: bool) -> None:
     if refresh or "live_curve" not in st.session_state:
-        st.session_state.live_curve = refresh_live_curve()
+        st.session_state.live_curve = fetch_lme_aluminum_monthly_curve()
+        st.session_state.live_curve["expiry"] = pd.to_datetime(st.session_state.live_curve["expiry"])
         st.session_state.live_refreshed = datetime.now().astimezone()
     curve = st.session_state.live_curve
-    refreshed = st.session_state.live_refreshed
     nearest = curve.iloc[0]
     farthest = curve.iloc[-1]
-    curve_change = farthest["forward_price"] / nearest["forward_price"] - 1
-    st.markdown(
-        f"<span class='snapshot-pill'>LME public market data · delayed ≥15 minutes · refreshed {refreshed.strftime('%b %d, %Y · %I:%M %p %Z')}</span>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"<span class='snapshot-pill'>LME public market data · delayed ≥15 minutes · refreshed {st.session_state.live_refreshed.strftime('%b %d, %Y · %I:%M %p %Z')}</span>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     c1.metric("Nearest Lock-In Reference", f"${nearest['forward_price']:,.0f}/t")
     c2.metric("Farthest Displayed Contract", f"${farthest['forward_price']:,.0f}/t")
-    c3.metric("Curve Change", f"{curve_change:+.1%}")
-    st.markdown("<div class='section-kicker'>Live Market</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>LME aluminum monthly futures curve</div>", unsafe_allow_html=True)
-    st.plotly_chart(make_curve_chart(curve), use_container_width=True, config={"displayModeBar": False})
+    c3.metric("Curve Change", f"{farthest['forward_price'] / nearest['forward_price'] - 1:+.1%}")
+    st.dataframe(curve, use_container_width=True, hide_index=True)
 
 
-def render_generic_snapshot(snap: Snapshot) -> None:
-    summary = snap.summary
-    strongest = summary.loc[summary["potential_hedge_protection_pct"].idxmax()]
-    nearest = summary.iloc[0]
-    st.markdown(f"<span class='snapshot-pill'>{snap.source_label}</span>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='insight-card'><div class='insight-label'>What stands out</div><div class='insight-text'>The largest modeled hedge-protection opportunity is <b>{strongest['potential_hedge_protection_pct']:.1%}</b> in <b>{strongest['expiry'].strftime('%b %Y')}</b>.</div></div>",
-        unsafe_allow_html=True,
-    )
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Near-Term Lock-In Price", f"${nearest['current_lock_in_price']:,.0f}/t")
-    c2.metric("Near-Term Market Outlook", f"${nearest['market_implied_price_scenario']:,.0f}/t")
-    c3.metric("Average Potential Hedge Protection", f"{summary['potential_hedge_protection_pct'].mean():.1%}")
-    st.plotly_chart(make_price_chart(summary), use_container_width=True, config={"displayModeBar": False})
-    st.plotly_chart(make_protection_chart(summary), use_container_width=True, config={"displayModeBar": False})
-    render_decision_table(summary)
+def build_generic_snapshot(source_mode: str, target_delta: float, futures_upload, options_upload) -> Snapshot:
+    if source_mode == "Demo data":
+        seed = int(datetime.now(timezone.utc).timestamp() // 60)
+        futures, options = generate_demo_market_data(seed=seed)
+        return build_snapshot_from_frames(futures, options, target_delta, "Illustrative demo data")
+    if futures_upload is None or options_upload is None:
+        raise ValueError("Upload both the futures CSV and options CSV before refreshing.")
+    return build_snapshot_from_frames(pd.read_csv(futures_upload), pd.read_csv(options_upload), target_delta, "Uploaded CSV snapshot")
 
 
 def main() -> None:
@@ -408,34 +351,20 @@ def main() -> None:
             index=0,
         )
         adverse_delta = st.slider(
-            "Adverse cost scenario",
-            min_value=0.25,
-            max_value=0.45,
-            value=DEFAULT_ADVERSE_DELTA,
-            step=0.05,
+            "Adverse cost scenario", 0.25, 0.45, DEFAULT_ADVERSE_DELTA, 0.05,
             help="Lower delta = less likely but more severe higher-cost scenario. The base outlook remains fixed at 50 delta.",
         )
-
-        futures_upload = None
-        options_upload = None
+        futures_upload = options_upload = None
         if source_mode == "Upload CSVs":
             futures_upload = st.file_uploader("Futures / forwards CSV", type="csv")
             options_upload = st.file_uploader("Call options CSV", type="csv")
-
-        if source_mode == "Historical CME + illustrative options":
-            st.caption(
-                "Default executive-demo mode: real Sep. 4, 2026 CME aluminum futures with synthetic 50-delta base, "
-                "35-delta adverse scenario, and illustrative recent-history normalization."
-            )
-        elif source_mode == "Live LME futures":
-            st.caption("Live delayed LME futures only. No options-derived outlook is shown in this mode.")
 
     left, right = st.columns([4.2, 1.15])
     with left:
         st.markdown("<div class='hero-eyebrow'>Commodity Risk Dashboard</div>", unsafe_allow_html=True)
         st.markdown(f"# {APP_TITLE}")
         st.markdown(
-            "<div class='hero-copy'>A management view of aluminum prices available to lock, compared with probability-based price-risk scenarios and a tenor-adjusted hedge signal.</div>",
+            "<div class='hero-copy'>Spot market context, forward lock-in prices, option-implied cost scenarios, and a tenor-adjusted hedge signal in one view.</div>",
             unsafe_allow_html=True,
         )
     with right:
@@ -456,13 +385,13 @@ def main() -> None:
 
     if refresh or "snapshot" not in st.session_state:
         try:
-            st.session_state.snapshot = build_snapshot_from_inputs(
-                source_mode, adverse_delta, futures_upload, options_upload
-            )
+            st.session_state.snapshot = build_generic_snapshot(source_mode, adverse_delta, futures_upload, options_upload)
         except Exception as exc:
             st.error(str(exc))
             st.stop()
-    render_generic_snapshot(st.session_state.snapshot)
+
+    snap = st.session_state.snapshot
+    st.dataframe(snap.summary, use_container_width=True, hide_index=True)
 
 
 if __name__ == "__main__":
