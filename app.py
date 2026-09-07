@@ -13,8 +13,10 @@ from market_logic import Snapshot, build_snapshot_from_frames, generate_demo_mar
 APP_TITLE = "Aluminum Market Outlook"
 BASE_OUTLOOK_DELTA = 0.50
 DEFAULT_ADVERSE_DELTA = 0.35
+HEDGE_SIGNAL_THRESHOLD_PP = 0.75
 HISTORICAL_CURVE_PATH = Path("data/barchart_cme_aluminum_2026-09-04.csv")
 ILLUSTRATIVE_OPTIONS_PATH = Path("data/illustrative_options_2026-09-04.csv")
+NORMAL_GAP_PATH = Path("data/illustrative_normal_gap_35delta.csv")
 
 PAGE_CSS = """
 <style>
@@ -29,6 +31,17 @@ div[data-testid="stMetric"] { background:#fff; border:1px solid #e5eaf0; border-
 .insight-label { color:#8a5f13; font-size:.76rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
 .insight-text { color:#3e4653; font-size:.96rem; line-height:1.5; }
 .disclosure-card { background:#f5f7fa; border:1px solid #dfe5ec; border-radius:12px; padding:.85rem 1rem; margin:.25rem 0 1rem 0; color:#5a6575; font-size:.84rem; line-height:1.5; }
+.signal-card { background:#f1f7f3; border:1px solid #cfe2d5; border-left:6px solid #4f7d5d; border-radius:14px; padding:1.05rem 1.25rem; margin:.45rem 0 1rem 0; }
+.signal-card.no-signal { background:#f7f8fa; border-color:#e2e6eb; border-left-color:#8894a5; }
+.signal-label { color:#486b53; font-size:.76rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.signal-card.no-signal .signal-label { color:#667085; }
+.signal-title { color:#1f3526; font-size:1.25rem; font-weight:750; margin-top:.15rem; }
+.signal-card.no-signal .signal-title { color:#344054; }
+.signal-copy { color:#4b5c50; font-size:.92rem; line-height:1.5; margin-top:.2rem; }
+.signal-card.no-signal .signal-copy { color:#667085; }
+.math-card { background:#ffffff; border:1px solid #e2e7ed; border-radius:14px; padding:1rem 1.2rem; margin:.35rem 0 1rem 0; }
+.math-title { color:#344054; font-size:.9rem; font-weight:750; margin-bottom:.35rem; }
+.math-copy { color:#667085; font-size:.86rem; line-height:1.6; }
 .section-kicker { color:#7a8699; font-size:.78rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; margin-top:.45rem; }
 .section-title { color:#172033; font-size:1.23rem; font-weight:700; }
 .section-subtitle { color:#667085; font-size:.9rem; margin-bottom:.55rem; }
@@ -44,6 +57,8 @@ COLORS = {
     "adverse": "#C58A21",
     "fill": "rgba(197,138,33,.10)",
     "bar": "#7C91B2",
+    "normal": "#A3ACB9",
+    "current_gap": "#C58A21",
     "grid": "#E8EDF3",
     "text": "#475467",
 }
@@ -57,7 +72,7 @@ def make_curve_chart(curve: pd.DataFrame) -> go.Figure:
         hovertemplate="%{x|%b %Y}<br>$%{y:,.0f}/t<extra></extra>",
     ))
     fig.update_layout(height=390, paper_bgcolor="white", plot_bgcolor="white",
-                      margin=dict(l=20,r=20,t=20,b=20), showlegend=False,
+                      margin=dict(l=20, r=20, t=20, b=20), showlegend=False,
                       font=dict(family="Arial, sans-serif", color=COLORS["text"]))
     fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
     fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True,
@@ -83,11 +98,12 @@ def make_historical_price_chart(base_summary: pd.DataFrame, adverse_summary: pd.
         fill="tonexty", fillcolor=COLORS["fill"],
         hovertemplate="%{x|%b %Y}<br>Adverse scenario: $%{y:,.0f}/t<extra></extra>",
     ))
-    fig.update_layout(height=440, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20,r=20,t=20,b=20),
+    fig.update_layout(height=440, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20, r=20, t=20, b=20),
                       hovermode="x unified", legend=dict(orientation="h", y=1.03),
                       font=dict(family="Arial, sans-serif", color=COLORS["text"]))
     fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
-    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True, gridcolor=COLORS["grid"], zeroline=False)
+    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True,
+                     gridcolor=COLORS["grid"], zeroline=False)
     return fig
 
 
@@ -102,11 +118,12 @@ def make_price_chart(summary: pd.DataFrame) -> go.Figure:
         name="Market-Implied Outlook", line=dict(color=COLORS["adverse"], width=3), marker=dict(size=8),
         fill="tonexty", fillcolor=COLORS["fill"],
     ))
-    fig.update_layout(height=430, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20,r=20,t=20,b=20),
+    fig.update_layout(height=430, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20, r=20, t=20, b=20),
                       hovermode="x unified", legend=dict(orientation="h", y=1.03),
                       font=dict(family="Arial, sans-serif", color=COLORS["text"]))
     fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
-    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True, gridcolor=COLORS["grid"], zeroline=False)
+    fig.update_yaxes(title="USD per tonne", tickprefix="$", separatethousands=True,
+                     gridcolor=COLORS["grid"], zeroline=False)
     return fig
 
 
@@ -117,10 +134,32 @@ def make_protection_chart(summary: pd.DataFrame) -> go.Figure:
         text=pct.map(lambda x: f"{x:.1f}%"), textposition="outside",
         hovertemplate="%{x|%b %Y}<br>Potential protection: %{y:.1f}%<extra></extra>",
     ))
-    fig.update_layout(height=315, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20,r=20,t=20,b=20),
+    fig.update_layout(height=315, paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=20, r=20, t=20, b=20),
                       font=dict(family="Arial, sans-serif", color=COLORS["text"]))
     fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
     fig.update_yaxes(title="Protection vs. lock-in", ticksuffix="%", gridcolor=COLORS["grid"], zeroline=False)
+    return fig
+
+
+def make_gap_vs_normal_chart(decision: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=decision["expiry"], y=decision["normal_gap_pct"] * 100,
+        name="Normal Gap", marker_color=COLORS["normal"],
+        hovertemplate="%{x|%b %Y}<br>Normal gap: %{y:.1f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=decision["expiry"], y=decision["current_gap_pct"] * 100,
+        name="Current Adverse Gap", marker_color=COLORS["current_gap"],
+        hovertemplate="%{x|%b %Y}<br>Current gap: %{y:.1f}%<extra></extra>",
+    ))
+    fig.update_layout(
+        barmode="group", height=350, paper_bgcolor="white", plot_bgcolor="white",
+        margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", y=1.03),
+        font=dict(family="Arial, sans-serif", color=COLORS["text"]),
+    )
+    fig.update_xaxes(showgrid=False, tickformat="%b\n%Y", zeroline=False)
+    fig.update_yaxes(title="Gap vs. forward", ticksuffix="%", gridcolor=COLORS["grid"], zeroline=False)
     return fig
 
 
@@ -140,7 +179,20 @@ def load_historical_snapshot(target_delta: float) -> Snapshot:
     curve = load_historical_curve()
     futures = curve[["expiry", "forward_price"]].copy()
     options = pd.read_csv(ILLUSTRATIVE_OPTIONS_PATH)
-    return build_snapshot_from_frames(futures, options, target_delta, "Real CME futures + illustrative synthetic options")
+    return build_snapshot_from_frames(
+        futures, options, target_delta, "Real CME futures + illustrative synthetic options"
+    )
+
+
+def build_decision_frame(summary: pd.DataFrame) -> pd.DataFrame:
+    benchmark = pd.read_csv(NORMAL_GAP_PATH)
+    benchmark["expiry"] = pd.to_datetime(benchmark["contract_month"] + "-01") + pd.offsets.MonthEnd(0)
+    decision = summary.merge(benchmark[["expiry", "normal_gap_pct"]], on="expiry", how="left")
+    decision["current_gap_pct"] = decision["potential_hedge_protection_pct"]
+    decision["excess_gap_pp"] = (decision["current_gap_pct"] - decision["normal_gap_pct"]) * 100
+    decision["hedge_signal"] = decision["excess_gap_pp"] >= HEDGE_SIGNAL_THRESHOLD_PP
+    decision["decision"] = decision["hedge_signal"].map({True: "HEDGE SIGNAL", False: "No signal"})
+    return decision
 
 
 def build_snapshot_from_inputs(source_mode: str, target_delta: float, futures_upload, options_upload) -> Snapshot:
@@ -150,7 +202,9 @@ def build_snapshot_from_inputs(source_mode: str, target_delta: float, futures_up
         return build_snapshot_from_frames(futures, options, target_delta, "Illustrative demo data")
     if futures_upload is None or options_upload is None:
         raise ValueError("Upload both the futures CSV and options CSV before refreshing.")
-    return build_snapshot_from_frames(pd.read_csv(futures_upload), pd.read_csv(options_upload), target_delta, "Uploaded CSV snapshot")
+    return build_snapshot_from_frames(
+        pd.read_csv(futures_upload), pd.read_csv(options_upload), target_delta, "Uploaded CSV snapshot"
+    )
 
 
 def render_decision_table(summary: pd.DataFrame, outlook_label: str = "Market-Implied Outlook") -> None:
@@ -161,14 +215,32 @@ def render_decision_table(summary: pd.DataFrame, outlook_label: str = "Market-Im
     table["Potential Hedge Protection"] = table["potential_hedge_protection"]
     table["Potential Hedge Protection %"] = table["potential_hedge_protection_pct"] * 100
     st.dataframe(
-        table[["Procurement Period", "Current Lock-In Price", outlook_label, "Potential Hedge Protection", "Potential Hedge Protection %"]],
-        use_container_width=True,
-        hide_index=True,
+        table[["Procurement Period", "Current Lock-In Price", outlook_label,
+               "Potential Hedge Protection", "Potential Hedge Protection %"]],
+        use_container_width=True, hide_index=True,
         column_config={
             "Current Lock-In Price": st.column_config.NumberColumn(format="$%.0f /t"),
             outlook_label: st.column_config.NumberColumn(format="$%.0f /t"),
             "Potential Hedge Protection": st.column_config.NumberColumn(format="$%.0f /t"),
             "Potential Hedge Protection %": st.column_config.NumberColumn(format="%.1f%%"),
+        },
+    )
+
+
+def render_signal_table(decision: pd.DataFrame) -> None:
+    table = decision.copy()
+    table["Procurement Period"] = table["expiry"].dt.strftime("%b %Y")
+    table["Current Gap"] = table["current_gap_pct"] * 100
+    table["Normal Gap"] = table["normal_gap_pct"] * 100
+    table["Excess vs. Normal"] = table["excess_gap_pp"]
+    table["Decision"] = table["decision"]
+    st.dataframe(
+        table[["Procurement Period", "Current Gap", "Normal Gap", "Excess vs. Normal", "Decision"]],
+        use_container_width=True, hide_index=True,
+        column_config={
+            "Current Gap": st.column_config.NumberColumn(format="%.1f%%"),
+            "Normal Gap": st.column_config.NumberColumn(format="%.1f%%"),
+            "Excess vs. Normal": st.column_config.NumberColumn(format="%+.1f pp"),
         },
     )
 
@@ -182,7 +254,10 @@ def render_historical_snapshot(adverse_delta: float) -> None:
     nearest = summary.iloc[0]
     average_protection = summary["potential_hedge_protection_pct"].mean()
 
-    st.markdown("<span class='snapshot-pill'>Historical CME aluminum snapshot · Sep 4, 2026 · real futures + illustrative options</span>", unsafe_allow_html=True)
+    st.markdown(
+        "<span class='snapshot-pill'>Historical CME aluminum snapshot · Sep 4, 2026 · real futures + illustrative options</span>",
+        unsafe_allow_html=True,
+    )
     st.markdown(f"""
     <div class='insight-card'>
         <div class='insight-label'>What stands out</div>
@@ -191,7 +266,7 @@ def render_historical_snapshot(adverse_delta: float) -> None:
     """, unsafe_allow_html=True)
 
     st.markdown("""
-    <div class='disclosure-card'><b>Demonstration disclosure:</b> The CME aluminum futures curve is a real Sep. 4, 2026 historical market snapshot sourced from Barchart. Both option-derived curves are synthetic placeholders. The 50-delta line is shown as a base market outlook; the selected lower-delta line is an adverse cost scenario used to illustrate risk protection. Neither should be interpreted as expected savings.</div>
+    <div class='disclosure-card'><b>Demonstration disclosure:</b> The CME aluminum futures curve is a real Sep. 4, 2026 historical market snapshot sourced from Barchart. Both option-derived curves and the recent-history normalization are synthetic placeholders constructed to demonstrate the proposed production workflow. They are not historical observations and should not be interpreted as expected savings.</div>
     """, unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
@@ -202,9 +277,71 @@ def render_historical_snapshot(adverse_delta: float) -> None:
     st.markdown("<div class='section-kicker'>Primary View</div>", unsafe_allow_html=True)
     st.markdown("<div class='section-title'>Lock-in price vs. option-implied scenarios</div>", unsafe_allow_html=True)
     st.markdown("<div class='section-subtitle'>The 50-delta line is a base outlook. The adverse-cost line uses a lower-delta scenario to show a plausible higher-cost outcome worth protecting against.</div>", unsafe_allow_html=True)
-    st.plotly_chart(make_historical_price_chart(base_summary, summary), use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(
+        make_historical_price_chart(base_summary, summary),
+        use_container_width=True,
+        config={"displayModeBar": False},
+    )
 
-    st.markdown("<div class='section-kicker'>Decision Support</div>", unsafe_allow_html=True)
+    if abs(adverse_delta - 0.35) < 1e-9:
+        decision = build_decision_frame(summary)
+        signaled = decision[decision["hedge_signal"]].sort_values("expiry")
+
+        st.markdown("<div class='section-kicker'>Decision Signal</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Is the adverse gap unusually wide?</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='section-subtitle'>This removes the mechanical effect of time-to-expiry by comparing each 35-delta gap with the normal gap for that same horizon.</div>",
+            unsafe_allow_html=True,
+        )
+
+        if not signaled.empty:
+            first_signal = signaled.iloc[0]
+            st.markdown(f"""
+            <div class='signal-card'>
+                <div class='signal-label'>Hedge signal</div>
+                <div class='signal-title'>{first_signal['expiry'].strftime('%b %Y')} is the first procurement period above the trigger</div>
+                <div class='signal-copy'>The current adverse gap is <b>{first_signal['current_gap_pct']:.1%}</b> versus a normal <b>{first_signal['normal_gap_pct']:.1%}</b> for that horizon — <b>{first_signal['excess_gap_pp']:.1f} percentage points wider than normal</b>. Under the illustrative policy, that is a signal to consider adding forward/futures hedge coverage for that expiry.</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class='signal-card no-signal'>
+                <div class='signal-label'>No hedge signal</div>
+                <div class='signal-title'>No procurement period is unusually wide enough to trigger the rule</div>
+                <div class='signal-copy'>The current adverse gaps remain within the illustrative tolerance around their normal tenor-adjusted levels.</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div class='math-card'>
+            <div class='math-title'>How the decision rule works</div>
+            <div class='math-copy'>
+                <b>1. Current adverse gap</b> = (35-delta scenario − forward price) ÷ forward price.<br>
+                <b>2. Normal gap</b> = the recent historical average 35-delta gap for the same time-to-expiry.<br>
+                <b>3. Excess gap</b> = current adverse gap − normal gap.<br>
+                <b>4. Decision</b> = if the excess gap is at least <b>{HEDGE_SIGNAL_THRESHOLD_PP:.2f} percentage points</b>, flag that expiry as a hedge candidate.<br><br>
+                The key idea is that a six-month option should normally sit farther from the forward than a one-month option. We only care when the gap is <i>unusually</i> wide relative to what is normal for that horizon.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.plotly_chart(
+            make_gap_vs_normal_chart(decision),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
+        render_signal_table(decision)
+        st.markdown(
+            "<div class='small-note'>POC policy parameter: the 0.75 percentage-point trigger and the normal-gap history are illustrative. In production, both would be calibrated from actual historical options data and approved hedge-policy limits.</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info(
+            "The normalized hedge-signal benchmark in this POC is calibrated only to the default 35-delta adverse scenario. "
+            "Return the sidebar setting to 0.35 to view the normal-vs-current decision signal."
+        )
+
+    st.markdown("<div class='section-kicker'>Scenario Protection</div>", unsafe_allow_html=True)
     st.markdown("<div class='section-title'>Potential hedge protection under the adverse cost scenario</div>", unsafe_allow_html=True)
     st.markdown("<div class='section-subtitle'>This measures protection if that adverse scenario occurs. It is deliberately not labeled as expected savings.</div>", unsafe_allow_html=True)
     st.plotly_chart(make_protection_chart(summary), use_container_width=True, config={"displayModeBar": False})
@@ -213,7 +350,10 @@ def render_historical_snapshot(adverse_delta: float) -> None:
     st.markdown("<div class='section-title'>Procurement decision table</div>", unsafe_allow_html=True)
     render_decision_table(summary, "Illustrative Adverse Cost Scenario")
 
-    st.markdown("<div class='small-note'>Futures source: Barchart public delayed CME/COMEX aluminum market pages, historical snapshot dated Sep. 4, 2026. Options layer: synthetic POC data. Production would replace the synthetic layer with licensed/live options data and calibrate scenario thresholds to the company's risk tolerance.</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='small-note'>Futures source: Barchart public delayed CME/COMEX aluminum market pages, historical snapshot dated Sep. 4, 2026. Options and normal-gap benchmark: synthetic POC data. Production would replace both synthetic layers with licensed/live and historical options data.</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_live_lme(refresh: bool) -> None:
@@ -225,7 +365,10 @@ def render_live_lme(refresh: bool) -> None:
     nearest = curve.iloc[0]
     farthest = curve.iloc[-1]
     curve_change = farthest["forward_price"] / nearest["forward_price"] - 1
-    st.markdown(f"<span class='snapshot-pill'>LME public market data · delayed ≥15 minutes · refreshed {refreshed.strftime('%b %d, %Y · %I:%M %p %Z')}</span>", unsafe_allow_html=True)
+    st.markdown(
+        f"<span class='snapshot-pill'>LME public market data · delayed ≥15 minutes · refreshed {refreshed.strftime('%b %d, %Y · %I:%M %p %Z')}</span>",
+        unsafe_allow_html=True,
+    )
     c1, c2, c3 = st.columns(3)
     c1.metric("Nearest Lock-In Reference", f"${nearest['forward_price']:,.0f}/t")
     c2.metric("Farthest Displayed Contract", f"${farthest['forward_price']:,.0f}/t")
@@ -240,7 +383,10 @@ def render_generic_snapshot(snap: Snapshot) -> None:
     strongest = summary.loc[summary["potential_hedge_protection_pct"].idxmax()]
     nearest = summary.iloc[0]
     st.markdown(f"<span class='snapshot-pill'>{snap.source_label}</span>", unsafe_allow_html=True)
-    st.markdown(f"<div class='insight-card'><div class='insight-label'>What stands out</div><div class='insight-text'>The largest modeled hedge-protection opportunity is <b>{strongest['potential_hedge_protection_pct']:.1%}</b> in <b>{strongest['expiry'].strftime('%b %Y')}</b>.</div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='insight-card'><div class='insight-label'>What stands out</div><div class='insight-text'>The largest modeled hedge-protection opportunity is <b>{strongest['potential_hedge_protection_pct']:.1%}</b> in <b>{strongest['expiry'].strftime('%b %Y')}</b>.</div></div>",
+        unsafe_allow_html=True,
+    )
     c1, c2, c3 = st.columns(3)
     c1.metric("Near-Term Lock-In Price", f"${nearest['current_lock_in_price']:,.0f}/t")
     c2.metric("Near-Term Market Outlook", f"${nearest['market_implied_price_scenario']:,.0f}/t")
@@ -256,7 +402,11 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown("### Dashboard Controls")
-        source_mode = st.radio("Data mode", ["Historical CME + illustrative options", "Live LME futures", "Demo data", "Upload CSVs"], index=0)
+        source_mode = st.radio(
+            "Data mode",
+            ["Historical CME + illustrative options", "Live LME futures", "Demo data", "Upload CSVs"],
+            index=0,
+        )
         adverse_delta = st.slider(
             "Adverse cost scenario",
             min_value=0.25,
@@ -273,7 +423,10 @@ def main() -> None:
             options_upload = st.file_uploader("Call options CSV", type="csv")
 
         if source_mode == "Historical CME + illustrative options":
-            st.caption("Default executive-demo mode: real Sep. 4, 2026 CME aluminum futures with synthetic 50-delta base and adverse-cost option scenarios.")
+            st.caption(
+                "Default executive-demo mode: real Sep. 4, 2026 CME aluminum futures with synthetic 50-delta base, "
+                "35-delta adverse scenario, and illustrative recent-history normalization."
+            )
         elif source_mode == "Live LME futures":
             st.caption("Live delayed LME futures only. No options-derived outlook is shown in this mode.")
 
@@ -281,7 +434,10 @@ def main() -> None:
     with left:
         st.markdown("<div class='hero-eyebrow'>Commodity Risk Dashboard</div>", unsafe_allow_html=True)
         st.markdown(f"# {APP_TITLE}")
-        st.markdown("<div class='hero-copy'>A management view of aluminum prices available to lock, compared with probability-based price-risk scenarios.</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='hero-copy'>A management view of aluminum prices available to lock, compared with probability-based price-risk scenarios and a tenor-adjusted hedge signal.</div>",
+            unsafe_allow_html=True,
+        )
     with right:
         st.write("")
         st.write("")
@@ -290,6 +446,7 @@ def main() -> None:
     if source_mode == "Historical CME + illustrative options":
         render_historical_snapshot(adverse_delta)
         return
+
     if source_mode == "Live LME futures":
         try:
             render_live_lme(refresh)
@@ -299,7 +456,9 @@ def main() -> None:
 
     if refresh or "snapshot" not in st.session_state:
         try:
-            st.session_state.snapshot = build_snapshot_from_inputs(source_mode, adverse_delta, futures_upload, options_upload)
+            st.session_state.snapshot = build_snapshot_from_inputs(
+                source_mode, adverse_delta, futures_upload, options_upload
+            )
         except Exception as exc:
             st.error(str(exc))
             st.stop()
